@@ -4,7 +4,7 @@
 % Last update: 5/18/2018
 %--------------------------------------------------------------------------
 
-function output = afferentedMuscleModel(t,Fs,Input,modelParameter)
+function output = afferentedMuscleModel(t,Fs,Input,modelParameter,gainParameter,control_type)
 %--------------------------------------------------------------------------
 % model parameters
 alpha = modelParameter.pennationAngle; % pennation angle
@@ -23,6 +23,7 @@ mass = modelParameter.mass; % muscle mass [kg]
 PCSA = (mass*1000)/(density*L0); % PCSA of muscle
 sigma = 31.8; % 31.8 specific tension
 F0 = PCSA * sigma; % maximal force
+Fmax = F0;
 
 Ur = 0.8; % fractional activation level at which all motor units for a given muscle are recruited (0-1)
 F_pcsa_slow = 0.5; % fractional PSCA of slow-twitch motor units (0-1)
@@ -79,6 +80,7 @@ S_vec = zeros(1,length(t));
 Force = zeros(1,length(t));
 Force_slow = zeros(1,length(t));
 Force_fast = zeros(1,length(t));
+ForceSE_vec = zeros(1,length(t));
 
 OutputLse = zeros(1,length(t));
 OutputLce = zeros(1,length(t));
@@ -126,6 +128,31 @@ noise_Ib = zeros(1,length(t));
 noise_Ib_filt = zeros(1,length(t));
 
 %--------------------------------------------------------------------------
+% Renshaw interneuron
+delta = 0.0015;
+tau1 = 0.14;
+tau3 = 0.003;
+tau4 = 0.09;
+H_RI = (1+tau1*s)*exp(-delta*s)/((1+tau3*s)*(1+tau4*s));
+Hd_RI = c2d(H_RI,1/Fs);
+[num_RI,den_RI] = tfdata(Hd_RI);
+num_RI = cell2mat(num_RI);
+den_RI = cell2mat(den_RI);
+
+FR_RI = zeros(1,length(t));
+FR_RI_temp = zeros(1,length(t));
+Input_RI = zeros(1,length(t));
+noise_RI = zeros(1,length(t));
+noise_RI_filt = zeros(1,length(t));
+
+%--------------------------------------------------------------------------
+% Propriospinal interneuron
+FR_PN = zeros(1,length(t));
+Input_PN = zeros(1,length(t));
+noise_PN = zeros(1,length(t));
+noise_PN_filt = zeros(1,length(t));
+
+%--------------------------------------------------------------------------
 % Neural drive related parameters
 noise_ND = zeros(1,length(t));
 noise_ND_filt = zeros(1,length(t));
@@ -136,23 +163,36 @@ ND_delayed = zeros(1,length(t));
 % noise related parameters
 [b_noise,a_noise] = butter(4,100/(Fs/2),'low');
 %--------------------------------------------------------------------------
-Gain_Ia = 400;
-Gain_Ib = 400;
-gamma_dynamic = 10;
-gamma_static = 10;
-Ia_PC = -1;
-Ib_PC = -1;
+% Gain parameters
+K = gainParameter.K;
+Ia_Gain = gainParameter.Ia_gain;
+Ib_Gain = gainParameter.Ib_gain;
+RI_Gain = gainParameter.RI_gain;
+gamma_dynamic = gainParameter.gamma_dynamic;
+gamma_static = gainParameter.gamma_static;
+Ia_PC = gainParameter.Ia_PC;
+Ib_PC = gainParameter.Ib_PC;
+RI_PC = gainParameter.RI_PC;
+PN_PC_Ia = gainParameter.PN_PC_Ia;
+PN_PC_Ib = gainParameter.PN_PC_Ib;
+PN_PC = gainParameter.PN_PC;
  
 %--------------------------------------------------------------------------
 distance_Muscle2SpinalCord = 0.8;
 conductionVelocity_efferent = 48.5;
 conductionVelocity_Ia = 64.5;
 conductionVelocity_Ib = 59.0;
-synaptic_delay = 2.0;
-delay_efferent = (round(distance_Muscle2SpinalCord/conductionVelocity_efferent*1000) + synaptic_delay)*Fs/1000;
-delay_Ia = (round(distance_Muscle2SpinalCord/conductionVelocity_Ia*1000) + synaptic_delay)*Fs/1000;
-delay_Ib = (round(distance_Muscle2SpinalCord/conductionVelocity_Ib*1000) + 2*synaptic_delay)*Fs/1000;
+delay_synaptic = 2*Fs/1000;
+delay_efferent = round(distance_Muscle2SpinalCord/conductionVelocity_efferent*1000)*Fs/1000 + delay_synaptic;
+delay_Ia = round(distance_Muscle2SpinalCord/conductionVelocity_Ia*1000)*Fs/1000 + delay_synaptic;
+delay_Ib = round(distance_Muscle2SpinalCord/conductionVelocity_Ib*1000)*Fs/1000 + 2*delay_synaptic;
+
 delay_C = 50*Fs/1000;
+%--------------------------------------------------------------------------
+F_target = Fmax*Input;
+Input_C_temp = 0;
+noise_C = zeros(1,length(t));
+noise_C_filt = zeros(1,length(t));
 %--------------------------------------------------------------------------
 % simulation
 for i = 1:length(t)
@@ -163,7 +203,7 @@ for i = 1:length(t)
     [AP_primary_chain,AP_secondary_chain,T_chain,T_dot_chain] = chain_model(gamma_static,T_chain,T_dot_chain,Lce,Vce,Ace,h);
     [Output_Primary,~] = Spindle_Output(AP_bag1,AP_primary_bag2,AP_secondary_bag2,AP_primary_chain,AP_secondary_chain);
     FR_Ia(i) = Output_Primary;
-    Input_Ia_temp = FR_Ia(i)/Gain_Ia + Ia_PC;
+    Input_Ia_temp = FR_Ia(i)/Ia_Gain + Ia_PC;
     if i > 5
         [noise_Ia,noise_Ia_filt] = noise_Output(noise_Ia,noise_Ia_filt,abs(Input_Ia_temp),i,b_noise,a_noise);
         Input_Ia(i) = Input_Ia_temp + noise_Ia_filt(i);
@@ -174,18 +214,43 @@ for i = 1:length(t)
     
     if i > 5
         [FR_Ib,FR_Ib_temp,x_GTO] = GTO_Output(FR_Ib,FR_Ib_temp,x_GTO,ForceSE,i,num_GTO,den_GTO);
-        Input_Ib_temp = FR_Ib(i)/Gain_Ib + Ib_PC;
+        Input_Ib_temp = FR_Ib(i)/Ib_Gain + Ib_PC;
         [noise_Ib,noise_Ib_filt] = noise_Output(noise_Ib,noise_Ib_filt,abs(Input_Ib_temp),i,b_noise,a_noise);
         Input_Ib(i) = Input_Ib_temp + noise_Ib_filt(i);
         if Input_Ib(i) < 0
             Input_Ib(i) = 0;
         end
+        
+        [FR_RI,FR_RI_temp] = Renshaw_Output(FR_RI,FR_RI_temp,ND,i,num_RI,den_RI);
+        Input_RI_temp = FR_RI(i)/RI_Gain + RI_PC;
+        [noise_RI,noise_RI_filt] = noise_Output(noise_RI,noise_RI_filt,abs(Input_RI_temp),i,b_noise,a_noise);
+        Input_RI(i) = Input_RI_temp + noise_RI_filt(i);
+        if Input_RI(i) < 0
+            Input_RI(i) = 0;
+        end
+    end
+    if t > delay_Ib
+        FR_PN(i) = (FR_Ia(i-delay_Ia)/Gain_Ia + PN_PC_Ia) + (FR_Ib(i-(delay_Ib-delay_synaptic))/Gain_Ib + PN_PC_Ib);
+        Input_PN_temp = FR_PN(i) + PN_PC;
+        [noise_PN,noise_PN_filt] = noise_Output(noise_PN,noise_PN_filt,abs(Input_PN_temp),i,b_noise,a_noise);
+        Input_PN(i) = Input_PN_temp + noise_PN_filt(i);
+        if Input_PN(i) < 0
+            Input_PN(i) = 0;
+        end
     end
     
     if i > delay_C
-        Input_exc = Input_Ia(i-delay_Ia);
-        Input_inh = Input_Ib(i-delay_Ib);
-        ND_temp = Input_exc - Input_inh + Input(i);
+        Input_exc = Input_Ia(i-delay_Ia)+Input_PN(i-delay_synaptic);
+        Input_inh = Input_Ib(i-delay_Ib)+Input_RI(i-delay_synaptic*2);
+        if control_type == 0
+            ND_temp = Input_exc - Input_inh + Input(i);
+        elseif control_type == 1
+            Input_C_temp = K*(F_target(i)-ForceSE_vec(i-delay_C))/Fmax + Input_C_temp;
+            [noise_C,noise_C_filt] = noise_Output(noise_C,noise_C_filt,abs(Input_C_temp),i,b_noise,a_noise);
+            Input_C = Input_C_temp + noise_C_filt(i);
+            ND_temp  = actionPotentialGeneration_function(Input_exc,Input_inh,2,2,Input_C);
+            %ND_temp = Input_exc - Input_inh + Input_C;
+        end
         if ND_temp < 0
             ND_temp = 0;
         end
@@ -294,7 +359,7 @@ for i = 1:length(t)
     Force_fast(i) = W2*Af_fast*F0;
     
     ForceSE = F_se_function(Lse)*F0;
-    
+    ForceSE_vec(i) = ForceSE;
     k_0 = h*MuscleVelocity(i);
     l_0 = h*((ForceSE*cos(alpha) - Force(i)*(cos(alpha)).^2)/(mass) ...
         + (MuscleVelocity(i)).^2*tan(alpha).^2/(MuscleLength(i)));
@@ -322,19 +387,28 @@ for i = 1:length(t)
     Lce = MuscleLength(i+1)/(L0/100);
     Lse = (Lmt - Lce*L0*cos(alpha))/L0T;
     
-    OutoutForceTendon(i) = ForceSE;
     OutputLse(i) = Lse; % normalized tendon length
     OutputLce(i) = Lce; % normalized muscle length
     OutputVce(i) = Vce; % normalized muscle excursion velocity
     OutputAce(i) = Ace; % normalized muscle excursion acceleration
-    OutputLmt(i) = Lmt; % normalized muscle excursion velocity
+   
     Output_U_eff(i) = U_eff;
 end
 
-output.Force_tendon = OutoutForceTendon;
+output.F0 = F0;
+output.Force_tendon = ForceSE_vec;
 output.Force_total = Force;
 output.Force_slow = Force_slow;
 output.Force_fast = Force_fast;
+output.Ia = FR_Ia;
+output.Ib = FR_Ib;
+output.RI = FR_RI;
+output.PN = FR_PN;
+output.Input_Ia = Input_Ia;
+output.Input_Ib = Input_Ib;
+output.Input_RI = Input_RI;
+output.Input_PN = Input_PN;
+output.ND = ND;
 output.U_eff = Output_U_eff;
 output.f_env_slow = f_env_slow_vec;
 output.f_env_fast = f_env_fast_vec;
@@ -348,7 +422,6 @@ output.Af_slow = Af_slow_vec;
 output.Af_fast = Af_fast_vec;
 output.Lce = OutputLce;
 output.Vce = OutputVce;
-output.Lmt = OutputLmt;
 %--------------------------------------------------------------------------
 % function used in simulation
     function Y = yield_function(Y,V,Fs)
@@ -624,9 +697,7 @@ output.Lmt = OutputLmt;
         else
             C = 0.42;
         end
-        
-        
-        
+              
         df_dynamic = (gamma_dynamic^p/(gamma_dynamic^p+freq_bag1^p)-f_dynamic)/tau_bag1;
         f_dynamic = step*df_dynamic + f_dynamic;
         
@@ -781,6 +852,16 @@ output.Lmt = OutputLmt;
         end
     end
 
+    function [FR_RI,FR_RI_temp] = Renshaw_Output(FR_RI,FR_RI_temp,ND,index,num,den)
+        
+        FR_RI_temp(index) = (num(3)*ND(index-2) + num(2)*ND(index-1) + num(1)*ND(index) - den(3)*FR_RI_temp(index-2) - den(2)*FR_RI_temp(index-1))/den(1);
+        FR_RI(index) = FR_RI_temp(index);
+        if FR_RI(index) < 0
+            FR_RI(index) = 0;
+        end
+    end
+
+
     function [noise,noise_filt] = noise_Output(noise,noise_filt,Input,index,b,a)
         amp = 0.0005;
         r = rand(1);
@@ -789,5 +870,13 @@ output.Lmt = OutputLmt;
             b(1)*noise(index) - a(5)*noise_filt(index-4) - a(4)*noise_filt(index-3) - a(3)*noise_filt(index-2) - ...
             a(2)*noise_filt(index-1))/a(1);      
         
+    end
+
+    function y = actionPotentialGeneration_function(Input_exc,Input_inh,n_exc,n_inh,IC)
+        HYP = 2.0;
+        OD = 2.0;        
+        s_inh = - HYP/n_inh;
+        s_exc = (1 + OD)/n_exc;
+        y = s_exc*(Input_exc) + s_inh*(Input_inh) + IC;
     end
 end
