@@ -23,7 +23,8 @@ mass = modelParameter.mass; % muscle mass [kg]
 PCSA = (mass*1000)/(density*L0); % PCSA of muscle
 sigma = 31.8; % 31.8 specific tension
 F0 = PCSA * sigma; % maximal force
-Fmax = F0;
+offset = modelParameter.offset;
+Fmax = modelParameter.Fmax-offset;
 
 Ur = 0.8; % fractional activation level at which all motor units for a given muscle are recruited (0-1)
 F_pcsa_slow = 0.5; % fractional PSCA of slow-twitch motor units (0-1)
@@ -204,8 +205,8 @@ for i = 1:length(t)
     [Output_Primary,~] = Spindle_Output(AP_bag1,AP_primary_bag2,AP_secondary_bag2,AP_primary_chain,AP_secondary_chain);
     FR_Ia(i) = Output_Primary;
     Input_Ia_temp = FR_Ia(i)/Ia_Gain + Ia_PC;
-    if i > 5
-        [noise_Ia,noise_Ia_filt] = noise_Output(noise_Ia,noise_Ia_filt,abs(Input_Ia_temp),i,b_noise,a_noise);
+    if i > 5       
+       [noise_Ia,noise_Ia_filt] = noise_Output(noise_Ia,noise_Ia_filt,abs(Input_Ia_temp),i,b_noise,a_noise);
         Input_Ia(i) = Input_Ia_temp + noise_Ia_filt(i);
         if Input_Ia(i) < 0
             Input_Ia(i) = 0;
@@ -245,7 +246,7 @@ for i = 1:length(t)
         if control_type == 0
             ND_temp = Input_exc - Input_inh + Input(i);
         elseif control_type == 1
-            Input_C_temp = K*(F_target(i)-ForceSE_vec(i-delay_C))/Fmax + Input_C_temp;
+            Input_C_temp = K*(F_target(i)-(ForceSE_vec(i-delay_C)-offset))/Fmax + Input_C_temp;
             [noise_C,noise_C_filt] = noise_Output(noise_C,noise_C_filt,abs(Input_C_temp),i,b_noise,a_noise);
             Input_C = Input_C_temp + noise_C_filt(i);
             ND_temp  = actionPotentialGeneration_function(Input_exc,Input_inh,2,2,Input_C);
@@ -863,7 +864,7 @@ output.Vce = OutputVce;
 
 
     function [noise,noise_filt] = noise_Output(noise,noise_filt,Input,index,b,a)
-        amp = 0.0005;
+        amp = 0.3;
         r = rand(1);
         noise(index) = 2*(r-0.5)*(sqrt(amp*Input)*sqrt(3));
         noise_filt(index) = (b(5)*noise(index-4) + b(4)*noise(index-3) + b(3)*noise(index-2) + b(2)*noise(index-1) + ...
