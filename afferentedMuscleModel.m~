@@ -23,7 +23,7 @@ mass = modelParameter.mass; % muscle mass [kg]
 PCSA = (mass*1000)/(density*L0); % PCSA of muscle
 sigma = 31.8; % 31.8 specific tension
 F0 = PCSA * sigma; % maximal force
-Fmax = F0;
+Fmax = modelParameter.Fmax;
 
 Ur = 0.8; % fractional activation level at which all motor units for a given muscle are recruited (0-1)
 F_pcsa_slow = 0.5; % fractional PSCA of slow-twitch motor units (0-1)
@@ -205,67 +205,73 @@ for i = 1:length(t)
     FR_Ia(i) = Output_Primary;
     Input_Ia_temp = FR_Ia(i)/Ia_Gain + Ia_PC;
     if i > 5
-        [noise_Ia,noise_Ia_filt] = noise_Output(noise_Ia,noise_Ia_filt,abs(Input_Ia_temp),i,b_noise,a_noise);
+        amp = 0.0005;
+        r = rand(1);
+        noise_Ia(i) = 2*(r-0.5)*(sqrt(amp*Input_Ia_temp)*sqrt(3));
+        noise__Ia_filt(index) = (b_noise(5)*noise(i-4) + b_noise(4)*noise(i-3) + b_noise(3)*noise(i-2) + b(2)*noise(inde-1) + ...
+            b(1)*noise(index) - a(5)*noise__Ia_filt(index-4) - a(4)*noise__Ia_filt(index-3) - a(3)*noise__Ia_filt(index-2) - ...
+            a(2)*noise__Ia_filt(index-1))/a(1);      
+        %[noise_Ia,noise_Ia_filt] = noise_Output(noise_Ia,noise_Ia_filt,abs(Input_Ia_temp),i,b_noise,a_noise);
         Input_Ia(i) = Input_Ia_temp + noise_Ia_filt(i);
         if Input_Ia(i) < 0
             Input_Ia(i) = 0;
         end
     end
     
-    if i > 5
-        [FR_Ib,FR_Ib_temp,x_GTO] = GTO_Output(FR_Ib,FR_Ib_temp,x_GTO,ForceSE,i,num_GTO,den_GTO);
-        Input_Ib_temp = FR_Ib(i)/Ib_Gain + Ib_PC;
-        [noise_Ib,noise_Ib_filt] = noise_Output(noise_Ib,noise_Ib_filt,abs(Input_Ib_temp),i,b_noise,a_noise);
-        Input_Ib(i) = Input_Ib_temp + noise_Ib_filt(i);
-        if Input_Ib(i) < 0
-            Input_Ib(i) = 0;
-        end
-        
-        [FR_RI,FR_RI_temp] = Renshaw_Output(FR_RI,FR_RI_temp,ND,i,num_RI,den_RI);
-        Input_RI_temp = FR_RI(i)/RI_Gain + RI_PC;
-        [noise_RI,noise_RI_filt] = noise_Output(noise_RI,noise_RI_filt,abs(Input_RI_temp),i,b_noise,a_noise);
-        Input_RI(i) = Input_RI_temp + noise_RI_filt(i);
-        if Input_RI(i) < 0
-            Input_RI(i) = 0;
-        end
-    end
-    if t > delay_Ib
-        FR_PN(i) = (FR_Ia(i-delay_Ia)/Gain_Ia + PN_PC_Ia) + (FR_Ib(i-(delay_Ib-delay_synaptic))/Gain_Ib + PN_PC_Ib);
-        Input_PN_temp = FR_PN(i) + PN_PC;
-        [noise_PN,noise_PN_filt] = noise_Output(noise_PN,noise_PN_filt,abs(Input_PN_temp),i,b_noise,a_noise);
-        Input_PN(i) = Input_PN_temp + noise_PN_filt(i);
-        if Input_PN(i) < 0
-            Input_PN(i) = 0;
-        end
-    end
-    
-    if i > delay_C
-        Input_exc = Input_Ia(i-delay_Ia)+Input_PN(i-delay_synaptic);
-        Input_inh = Input_Ib(i-delay_Ib)+Input_RI(i-delay_synaptic*2);
-        if control_type == 0
-            ND_temp = Input_exc - Input_inh + Input(i);
-        elseif control_type == 1
-            Input_C_temp = K*(F_target(i)-ForceSE_vec(i-delay_C))/Fmax + Input_C_temp;
-            [noise_C,noise_C_filt] = noise_Output(noise_C,noise_C_filt,abs(Input_C_temp),i,b_noise,a_noise);
-            Input_C = Input_C_temp + noise_C_filt(i);
-            ND_temp  = actionPotentialGeneration_function(Input_exc,Input_inh,2,2,Input_C);
-            %ND_temp = Input_exc - Input_inh + Input_C;
-        end
-        if ND_temp < 0
-            ND_temp = 0;
-        end
-        [noise_ND,noise_ND_filt] = noise_Output(noise_ND,noise_ND_filt,abs(ND_temp),i,b_noise,a_noise);
-    end
-    ND(i) = ND_temp + noise_ND_filt(i);
-    if ND(i) < 0
-        ND(i) = 0;
-    end
-    
-    if i > delay_efferent
-        ND_delayed(i) = ND(i-delay_efferent);
-    end
-    U = ND_delayed(i);
-    
+%     if i > 5
+%         [FR_Ib,FR_Ib_temp,x_GTO] = GTO_Output(FR_Ib,FR_Ib_temp,x_GTO,ForceSE,i,num_GTO,den_GTO);
+%         Input_Ib_temp = FR_Ib(i)/Ib_Gain + Ib_PC;
+%         [noise_Ib,noise_Ib_filt] = noise_Output(noise_Ib,noise_Ib_filt,abs(Input_Ib_temp),i,b_noise,a_noise);
+%         Input_Ib(i) = Input_Ib_temp + noise_Ib_filt(i);
+%         if Input_Ib(i) < 0
+%             Input_Ib(i) = 0;
+%         end
+%         
+%         [FR_RI,FR_RI_temp] = Renshaw_Output(FR_RI,FR_RI_temp,ND,i,num_RI,den_RI);
+%         Input_RI_temp = FR_RI(i)/RI_Gain + RI_PC;
+%         [noise_RI,noise_RI_filt] = noise_Output(noise_RI,noise_RI_filt,abs(Input_RI_temp),i,b_noise,a_noise);
+%         Input_RI(i) = Input_RI_temp + noise_RI_filt(i);
+%         if Input_RI(i) < 0
+%             Input_RI(i) = 0;
+%         end
+%     end
+%     if t > delay_Ib
+%         FR_PN(i) = (FR_Ia(i-delay_Ia)/Gain_Ia + PN_PC_Ia) + (FR_Ib(i-(delay_Ib-delay_synaptic))/Gain_Ib + PN_PC_Ib);
+%         Input_PN_temp = FR_PN(i) + PN_PC;
+%         [noise_PN,noise_PN_filt] = noise_Output(noise_PN,noise_PN_filt,abs(Input_PN_temp),i,b_noise,a_noise);
+%         Input_PN(i) = Input_PN_temp + noise_PN_filt(i);
+%         if Input_PN(i) < 0
+%             Input_PN(i) = 0;
+%         end
+%     end
+%     
+%     if i > delay_C
+%         Input_exc = Input_Ia(i-delay_Ia)+Input_PN(i-delay_synaptic);
+%         Input_inh = Input_Ib(i-delay_Ib)+Input_RI(i-delay_synaptic*2);
+%         if control_type == 0
+%             ND_temp = Input_exc - Input_inh + Input(i);
+%         elseif control_type == 1
+%             Input_C_temp = K*(F_target(i)-ForceSE_vec(i-delay_C))/Fmax + Input_C_temp;
+%             [noise_C,noise_C_filt] = noise_Output(noise_C,noise_C_filt,abs(Input_C_temp),i,b_noise,a_noise);
+%             Input_C = Input_C_temp + noise_C_filt(i);
+%             ND_temp  = actionPotentialGeneration_function(Input_exc,Input_inh,2,2,Input_C);
+%             %ND_temp = Input_exc - Input_inh + Input_C;
+%         end
+%         if ND_temp < 0
+%             ND_temp = 0;
+%         end
+%         [noise_ND,noise_ND_filt] = noise_Output(noise_ND,noise_ND_filt,abs(ND_temp),i,b_noise,a_noise);
+%     end
+%     ND(i) = ND_temp + noise_ND_filt(i);
+%     if ND(i) < 0
+%         ND(i) = 0;
+%     end
+%     
+%     if i > delay_efferent
+%         ND_delayed(i) = ND(i-delay_efferent);
+%     end
+%     U = ND_delayed(i);
+    U = Input(i);
     if U >= U_eff
         T_U = 0.03;
     elseif U < U_eff
@@ -401,10 +407,14 @@ output.Force_total = Force;
 output.Force_slow = Force_slow;
 output.Force_fast = Force_fast;
 output.Ia = FR_Ia;
-output.Ib = FR_Ib;
-output.RI = FR_RI;
-output.Ib = FR_Ib;
-output.ND = ND;
+% output.Ib = FR_Ib;
+% output.RI = FR_RI;
+% output.PN = FR_PN;
+% output.Input_Ia = Input_Ia;
+% output.Input_Ib = Input_Ib;
+% output.Input_RI = Input_RI;
+% output.Input_PN = Input_PN;
+% output.ND = ND;
 output.U_eff = Output_U_eff;
 output.f_env_slow = f_env_slow_vec;
 output.f_env_fast = f_env_fast_vec;
@@ -858,15 +868,15 @@ output.Vce = OutputVce;
     end
 
 
-    function [noise,noise_filt] = noise_Output(noise,noise_filt,Input,index,b,a)
-        amp = 0.0005;
-        r = rand(1);
-        noise(index) = 2*(r-0.5)*(sqrt(amp*Input)*sqrt(3));
-        noise_filt(index) = (b(5)*noise(index-4) + b(4)*noise(index-3) + b(3)*noise(index-2) + b(2)*noise(index-1) + ...
-            b(1)*noise(index) - a(5)*noise_filt(index-4) - a(4)*noise_filt(index-3) - a(3)*noise_filt(index-2) - ...
-            a(2)*noise_filt(index-1))/a(1);      
-        
-    end
+%     function [noise,noise_filt] = noise_Output(noise,noise_filt,Input,index,b,a)
+%         amp = 0.0005;
+%         r = rand(1);
+%         noise(index) = 2*(r-0.5)*(sqrt(amp*Input)*sqrt(3));
+%         noise_filt(index) = (b(5)*noise(index-4) + b(4)*noise(index-3) + b(3)*noise(index-2) + b(2)*noise(index-1) + ...
+%             b(1)*noise(index) - a(5)*noise_filt(index-4) - a(4)*noise_filt(index-3) - a(3)*noise_filt(index-2) - ...
+%             a(2)*noise_filt(index-1))/a(1);      
+%         
+%     end
 
     function y = actionPotentialGeneration_function(Input_exc,Input_inh,n_exc,n_inh,IC)
         HYP = 2.0;
